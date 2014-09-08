@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+
+import argparse
+import logging
+import os
+import pdb
+import pprint
+import subprocess
+import sys
+
+
+class main:
+
+    def __init__(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--debug', default=False, action='store_true')
+        parser.add_argument('path')
+        parser.add_argument('-ss')
+        parser.add_argument('-t')
+        namespace = parser.parse_args()
+        self.debug = namespace.debug
+        self.path = namespace.path
+        self.ss = namespace.ss
+        self.t = namespace.t
+        logging.basicConfig(
+            level=logging.DEBUG if self.debug else logging.INFO,
+            stream=sys.stderr)
+        self.ffmpeg()
+
+    def ffmpeg(self):
+        ss = self.ss
+        t = self.t
+        path = self.path
+        args = [
+            'ffmpeg',
+            '-threads', '4',
+            '-async', '1',
+        ]
+        # putting time position before the input argument improves the initial seek time
+        if ss is not None:
+            args += ['-ss', ss]
+        if t is not None:
+            args += ['-t', t]
+        args += [
+            '-i', path,
+            #~ '-vcodec', 'mpeg2video',
+            #~ '-b'
+            #~ '-sameq',
+            #~ '-aspect', '16:9',
+            #~ '-s', '1280x720',
+        ]
+        # forcing a channel count is sometimes required due to audio encoding
+        import ffprobe
+        from collections import OrderedDict
+
+        def stream_args(stream):
+            args = None
+            if stream['codec_type'] == 'video':
+                if stream['codec_name'] == 'h264' and int(stream['is_avc']):
+                    args = ['-vcodec', 'copy', '-sameq', '-vbsf', 'h264_mp4toannexb']
+                else:
+                    args = ['-target', 'pal-dvd'] # or film?
+            elif stream['codec_type'] == 'audio':
+                if stream['codec_name'] == 'dca':
+                #~ if False:
+                    # copying dca seems to break ffmpeg, so lets recode it
+                    args = ['-acodec', 'ac3', '-ab', '224k', '-ac', '2']
+                else:
+                    args = ['-acodec', 'copy']
+            elif stream['codec_type'] == 'subtitle':
+                if stream['codec_name'] != 'unknown':
+                    args = ['-scodec', 'copy']
+            if args is not None:
+                args += ['-map', '0:' + stream['index']]
+            return args
+
+        streams = ffprobe.ffprobe(path)['STREAM']
+
+        x = OrderedDict()
+        for s in streams:
+            sa = stream_args(s)
+            if sa is None:
+                continue
+            x.setdefault(s['codec_type'], []).append((s, sa))
+        x['audio'].sort(key=(lambda e: e[0].get('TAG:language') == 'eng'), reverse=True)
+
+        if logging.getLogger().isEnabledFor(logging.DEBUG):
+            logging.debug('ffmpeg stream to args:\n%s', pprint.pformat(list(x.values())))
+
+        for _, l in sorted(x.items(), key=(lambda i: i[0].lower()!='video')):
+            args += l[0][1]
+
+        args += ['-f', 'mpegts', 'pipe:']
+
+        for ct, l in x.items():
+            for s, sa in l[1:]:
+                args += sa + ['-new'+ct]
+
+        logging.info('Execing {!r}'.format(subprocess.list2cmdline(args)))
+        if self.debug:
+            return
+        sys.stderr.flush() # flush that bitch
+        #~ sys.exit()
+
+        with open('transcode.log.{:d}'.format(os.getpid()), 'w') as stderr:
+            logging.info('Logging transcoder output to %r', stderr.name)
+            child = subprocess.Popen(args, stderr=stderr)
+            sys.stdout.close()
+            os.close(1)
+            raise SystemExit(child.wait())
+
+
+main()
+
+# alternate transcoder arguments
+
+#elif False: pass
+    #args = ['mencoder']
+    # -ss and -endpos (not relative)
+    #~ '-oac', 'lavc', '-ovc', 'lavc', '-of', 'mpegts', '-mpegopts',
+    #~ 'format=dvd:tsaf', '-vf', 'scale=720:576,harddup', '-srate', '48000',
+    #~ '-af', 'lavcresample=48000', '-lavcopts',
+    #~ 'vcodec=mpeg2video:vrc_buf_size=1835:vrc_maxrate=9800:vbitrate=5000:keyint=15:vstrict=0:acodec=ac3:abitrate=192:aspect=16/9', '-ofps', '25',
+    #~ '-o', '/dev/stdout', path
+#elif False: pass
+    #~ args = ['vlc', '-I', 'dummy']
+    #~ args += [
+        #~ '--sout', '#transcode{vcodec=mp2v,fps=24,vb=6000}:std{mux=ts,access=file,dst=/dev/stdout}',
+    # --start-time and --end-time (relative)
+        #~ path,

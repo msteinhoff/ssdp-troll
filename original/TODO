@@ -1,0 +1,7 @@
+ * tidy up logging: apache lines to console
+ * other stuff to log/
+ * add a profiling option? profile the ffprobe/res_data threads
+ * prefetch directory object_xml data?
+ * look into weakref sets?
+ * remove traceback on transcode failure
+ * try putting a fifo in the media dir to stream the computers screen, or add a special file to this effect

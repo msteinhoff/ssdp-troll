@@ -1,0 +1,2 @@
+ * Some versions of ffmpeg have issues when exec'd into from Python. I suspect this is because SIGPIPE is set to SIG_IGN. I currently work around it.
+ * ffmpeg has issues putting mpeg4 into mpegts streams. Only h264 AVC is left untouched in the provided transcode script.
